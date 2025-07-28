@@ -1,0 +1,122 @@
+graph TB
+%% Client Side
+subgraph "Client/CDN Tier"
+U[👤 User] --> CF[☁️ CloudFront CDN]
+CF --> FE[🌐 Frontend App S3 CloudFront]
+FE --> WS[🔌 WebSocket Client]
+end
+
+%% AWS Infrastructure
+subgraph "AWS Infrastructure Tier"
+ALB[⚖️ Application Load Balancer ALB]
+APIGW[🚪 API Gateway Custom Authorizer]
+WAF[🛡️ AWS WAF DDoS Protection]
+end
+
+%% Compute Services
+subgraph "AWS Compute Tier"
+subgraph "ECS Fargate Cluster"
+AUTH[🔐 Auth Service ECS Fargate]
+SCORE[📊 Score Service ECS Fargate]
+LEADER[🏆 Leaderboard Service ECS Fargate]
+WSM[📡 WebSocket Manager ECS Fargate]
+end
+
+LAMBDA_RATE[⚡ Rate Limiter Lambda Function]
+LAMBDA_AUDIT[📝 Audit Logger Lambda Function]
+end
+
+%% AWS Data Services
+subgraph "AWS Data Tier"
+RDS[(🗄️ RDS PostgreSQL Multi-AZ)]
+ELASTICACHE[(⚡ ElastiCache Redis Cluster Mode)]
+SQS[📬 SQS Queue Standard Queue]
+SNS[📢 SNS Topic Fan-out Pattern]
+end
+
+%% AWS Monitoring & Security
+subgraph "AWS Monitoring & Security"
+CW[📊 CloudWatch Logs Metrics]
+CWA[🚨 CloudWatch Alarms]
+XRAY[🔍 X-Ray Tracing]
+COGNITO[👥 Cognito User Pool]
+SECRETS[🔑 Secrets Manager]
+KMS[🔐 KMS Encryption Keys]
+end
+
+%% Score Update Flow
+U -->|1. User Action| CF
+CF -->|2. Static Assets| FE
+FE -->|3. POST scores update JWT Token| WAF
+WAF -->|4. DDoS Protection| ALB
+ALB -->|5. Load Balance| APIGW
+APIGW -->|6. Custom Authorizer| COGNITO
+COGNITO -->|7. Validate JWT| LAMBDA_RATE
+LAMBDA_RATE -->|8. Rate Limiting Check DynamoDB| AUTH
+AUTH -->|9. Additional Auth| SCORE
+
+%% Score Processing
+SCORE -->|10. Validate Action Idempotency Check| SCORE
+SCORE -->|11. Update Score| RDS
+SCORE -->|12. Async Audit Log| LAMBDA_AUDIT
+LAMBDA_AUDIT -->|13. Store Audit| RDS
+
+%% Real-time Update Flow
+SCORE -->|14. Trigger Update| SNS
+SNS -->|15. Fan-out| SQS
+SNS -->|15. Fan-out| LEADER
+SQS -->|16. Process Queue| WSM
+LEADER -->|17. Update Cache| ELASTICACHE
+WSM -->|18. Broadcast| WS
+WS -->|19. Real-time UI| FE
+
+%% Leaderboard Retrieval
+FE -->|GET leaderboard top10| WAF
+WAF --> ALB
+ALB --> APIGW
+APIGW --> LEADER
+LEADER -->|Cache Check| ELASTICACHE
+ELASTICACHE -->|Cache Hit Miss| LEADER
+LEADER -->|Fallback Query| RDS
+LEADER -->|Response Cache| FE
+
+%% Monitoring Integration
+AUTH --> CW
+SCORE --> CW
+LEADER --> CW
+WSM --> CW
+LAMBDA_RATE --> CW
+LAMBDA_AUDIT --> CW
+
+%% Distributed Tracing
+AUTH --> XRAY
+SCORE --> XRAY
+LEADER --> XRAY
+APIGW --> XRAY
+
+%% Alerting
+CW --> CWA
+LAMBDA_RATE -->|Rate Limit Breach| CWA
+SCORE -->|Anomaly Detection| CWA
+RDS -->|Performance Issues| CWA
+
+%% Security Integration
+AUTH --> SECRETS
+SCORE --> SECRETS
+RDS --> KMS
+ELASTICACHE --> KMS
+
+%% Styling with AWS Colors
+classDef awsCompute fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:#FFFFFF
+classDef awsData fill:#3F48CC,stroke:#232F3E,stroke-width:2px,color:#FFFFFF
+classDef awsNetworking fill:#FF4B4B,stroke:#232F3E,stroke-width:2px,color:#FFFFFF
+classDef awsMonitoring fill:#759C3E,stroke:#232F3E,stroke-width:2px,color:#FFFFFF
+classDef awsSecurity fill:#DD344C,stroke:#232F3E,stroke-width:2px,color:#FFFFFF
+classDef client fill:#E1F5FE,stroke:#01579B,stroke-width:2px
+
+class AUTH,SCORE,LEADER,WSM,LAMBDA_RATE,LAMBDA_AUDIT awsCompute
+class RDS,ELASTICACHE,SQS,SNS awsData
+class ALB,APIGW,WAF,CF awsNetworking
+class CW,CWA,XRAY awsMonitoring
+class COGNITO,SECRETS,KMS awsSecurity
+class U,FE,WS client
